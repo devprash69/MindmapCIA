@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=900, initial-scale=1.0">
+  <title>Mind Map Generator</title>
+  <link href="https://fonts.googleapis.com/css?family=Poppins:400,600&display=swap" rel="stylesheet">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      background: #111;
+      color: #fff;
+      font-family: 'Poppins', Arial, sans-serif;
+      min-height: 100vh;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100vh;
+      background: #111;
+    }
+    h1 {
+      font-weight: 600;
+      margin-top: 32px;
+      margin-bottom: 12px;
+      letter-spacing: 1px;
+    }
+    .mindmap-controls {
+      display: flex;
+      flex-direction: row;
+      gap: 12px;
+      margin-bottom: 24px;
+      margin-top: 8px;
+    }
+    .mindmap-controls input[type="text"] {  
+      background: #222;
+      border: 1px solid #444;
+      color: #fff;
+      font-size: 1.1rem;
+      padding: 10px 16px;
+      border-radius: 6px;
+      outline: none;
+      width: 320px;
+      font-family: 'Poppins', Arial, sans-serif;
+      transition: border 0.2s;
+    }
+    .mindmap-controls input[type="text"]:focus {
+      border: 1.5px solid #fff;
+    }
+    .mindmap-controls button {
+      background: #181818;
+      color: #fff;
+      border: 1px solid #fff;
+      border-radius: 6px;
+      font-family: 'Poppins', Arial, sans-serif;
+      font-size: 1.1rem;
+      padding: 10px 22px;
+      cursor: pointer;
+      box-shadow: 0 2px 8px 0 rgba(0,0,0,0.18);
+      transition: background 0.2s, color 0.2s;
+    }
+    .mindmap-controls button:active {
+      background: #333;
+    }
+    #mindmap-container {
+      background: #111;
+      border-radius: 18px;
+      box-shadow: 0 4px 32px 0 rgba(0,0,0,0.25);
+      margin-bottom: 32px;
+      margin-top: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 900px;
+      height: 900px;
+      position: relative;
+    }
+    #mindmap-canvas {
+      background: #111;
+      border-radius: 18px;
+      box-shadow: 0 2px 16px 0 rgba(0,0,0,0.18);
+      display: block;
+      margin: 0 auto;
+    }
+    .error-message {
+      color: #ff6b6b;
+      font-size: 1.05rem;
+      margin-top: 10px;
+      min-height: 24px;
+      text-align: center;
+      letter-spacing: 0.2px;
+    }
+    .circle {
+      position: absolute;
+      border-radius: 50%;
+      padding: 16px;
+      background: #121212;
+      color: white;
+      text-align: center;
+      font-weight: 500;
+      border: 2px solid white;
+      font-size: 14px;
+      width: max-content;
+      max-width: 140px;
+      word-wrap: break-word;
+      box-shadow: 0 8px 20px rgba(255, 255, 255, 0.08);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      z-index: 2;
+    }
+    .circle:hover {
+      transform: scale(1.1);
+      box-shadow: 0 0 12px rgba(255, 255, 255, 0.4);
+    }
+    @media (max-width: 950px) {
+      #mindmap-container, #mindmap-canvas {
+        width: 100vw;
+        height: 100vw;
+        max-width: 98vw;
+        max-height: 98vw;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>Mind Map Generator</h1>
+  <div class="mindmap-controls">
+    <input type="text" id="topic-input" placeholder="Enter your topic..." maxlength="60" autocomplete="off">
+    <button id="generate-btn">Generate</button>
+    <button id="download-btn" disabled>Download</button>
+  </div>
+  <div class="error-message" id="error-message"></div>
+  <div id="mindmap-container">
+    <canvas id="mindmap-canvas" width="900" height="900"></canvas>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script>
+    const API_KEY = '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';
+    const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+    const MODEL = 'deepseek/deepseek-chat';
+    const canvas = document.getElementById('mindmap-canvas');
+    const ctx = canvas.getContext('2d');
+    const generateBtn = document.getElementById('generate-btn');
+    const downloadBtn = document.getElementById('download-btn');
+    const topicInput = document.getElementById('topic-input');
+    const errorMessage = document.getElementById('error-message');
+    let lastMapData = null;
+
+    function clearCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function showError(msg) {
+      errorMessage.textContent = msg;
+    }
+
+    function clearError() {
+      errorMessage.textContent = '';
+    }
+
+    function measureNodeSize(text, baseW, baseH, font, padding = 18, minW = 48, minH = 32, maxW = 260, maxH = 120) {
+      ctx.save();
+      ctx.font = font;
+      const lines = text.split(' ');
+      let maxLine = '';
+      let line = '';
+      for (let i = 0; i < lines.length; i++) {
+        let testLine = line + lines[i] + ' ';
+        if (ctx.measureText(testLine).width > maxW && i > 0) {
+          if (ctx.measureText(line).width > ctx.measureText(maxLine).width) maxLine = line;
+          line = lines[i] + ' ';
+        } else {
+          line = testLine;
+        }
+      }
+      if (ctx.measureText(line).width > ctx.measureText(maxLine).width) maxLine = line;
+      const textW = Math.min(ctx.measureText(maxLine).width + padding * 2, maxW);
+      const textH = Math.min((Math.ceil((ctx.measureText(text).width / maxW) + 1) * baseH) + padding, maxH);
+      ctx.restore();
+      return { w: Math.max(textW, minW), h: Math.max(textH, minH) };
+    }
+
+    function drawNode(x, y, w, h, fill, shadowAlpha=0.18, borderRadius=32) {
+      ctx.save();
+      ctx.beginPath();
+      if (w === h) {
+        ctx.arc(x, y, w/2, 0, Math.PI*2);
+      } else {
+        // Draw oval/rect with borderRadius
+        ctx.moveTo(x - w/2 + borderRadius, y - h/2);
+        ctx.lineTo(x + w/2 - borderRadius, y - h/2);
+        ctx.quadraticCurveTo(x + w/2, y - h/2, x + w/2, y - h/2 + borderRadius);
+        ctx.lineTo(x + w/2, y + h/2 - borderRadius);
+        ctx.quadraticCurveTo(x + w/2, y + h/2, x + w/2 - borderRadius, y + h/2);
+        ctx.lineTo(x - w/2 + borderRadius, y + h/2);
+        ctx.quadraticCurveTo(x - w/2, y + h/2, x - w/2, y + h/2 - borderRadius);
+        ctx.lineTo(x - w/2, y - h/2 + borderRadius);
+        ctx.quadraticCurveTo(x - w/2, y - h/2, x - w/2 + borderRadius, y - h/2);
+      }
+      ctx.closePath();
+      ctx.shadowColor = `rgba(0,0,0,${shadowAlpha})`;
+      ctx.shadowBlur = 16;
+      ctx.fillStyle = fill;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2.2;
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawCurvedLine(x1, y1, x2, y2, curve = 0.18) {
+      ctx.save();
+      ctx.beginPath();
+      const mx = (x1 + x2) / 2;
+      const my = (y1 + y2) / 2;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      // Perpendicular offset for curve
+      const nx = -dy * curve;
+      const ny = dx * curve;
+      ctx.moveTo(x1, y1);
+      ctx.quadraticCurveTo(mx + nx, my + ny, x2, y2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawMindMap(topic, data) {
+      clearCanvas();
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const w = canvas.width;
+      const h = canvas.height;
+      const center = { x: w/2, y: h/2 };
+      // --- Node sizes and dynamic scaling ---
+      let centerFont = 22, headingFont = 15, subFont = 11;
+      let centerPad = 24, headingPad = 18, subPad = 14;
+      let maxNodeW = 260, maxNodeH = 120;
+      let fits = false, attempts = 0;
+      let headingCircleDist, subCircleDist;
+      let centerSize, headingSizes, subSizes, headingAngles, headingCenters, allSubCenters;
+      // Diagonal, even heading distribution (30° offset)
+      const headingBaseAngle = Math.PI/6; // 30°
+      // Try to fit everything, reducing font/padding if needed
+      while (!fits && attempts < 10) {
+        ctx.font = `600 ${centerFont}px Poppins, Arial, sans-serif`;
+        centerSize = measureNodeSize(topic, 120, 48, ctx.font, centerPad, 68, 48, maxNodeW, maxNodeH);
+        ctx.font = `600 ${headingFont}px Poppins, Arial, sans-serif`;
+        headingSizes = data.map(item => {
+          // Reduce font for long headings
+          let f = headingFont - Math.min(3, Math.floor(item.heading.length/16));
+          let p = headingPad - Math.min(6, Math.floor(item.heading.length/18));
+          return measureNodeSize(item.heading, 90, 38, `600 ${f}px Poppins, Arial, sans-serif`, p, 44, 28, 200, 80);
+        });
+        ctx.font = `400 ${subFont}px Poppins, Arial, sans-serif`;
+        subSizes = data.map(item => item.subpoints.map(sub => {
+          // Reduce font for long subpoints
+          let f = subFont - Math.min(2, Math.floor(sub.length/18));
+          let p = subPad - Math.min(5, Math.floor(sub.length/20));
+          return measureNodeSize(sub, 60, 28, `400 ${f}px Poppins, Arial, sans-serif`, p, 32, 18, 160, 60);
+        }));
+        // Layout radii
+        let maxHeadingH = Math.max(...headingSizes.map(s => s.h));
+        let maxSubH = Math.max(...subSizes.flat().map(s => s.h));
+        headingCircleDist = 220 + centerSize.h/2; // Shorter lines for headings
+        subCircleDist = 70 + maxHeadingH/2; // Shorter lines for subpoints
+        // Place headings (diagonal, even)
+        headingAngles = [];
+        for (let i = 0; i < 6; i++) headingAngles.push((Math.PI * 2 / 6) * i - Math.PI/2 + headingBaseAngle);
+        headingCenters = headingAngles.map((angle, i) => {
+          let r = headingCircleDist;
+          // Move left/right headings (angles closest to 0° and 180°) farther out by 18px
+          const deg = ((angle * 180) / Math.PI + 360) % 360;
+          if (deg < 30 || deg > 330 || (deg > 150 && deg < 210)) {
+            r += 18;
+          }
+          return {
+            x: Math.min(Math.max(center.x + Math.cos(angle) * r, headingSizes[i].w/2), w - headingSizes[i].w/2),
+            y: Math.min(Math.max(center.y + Math.sin(angle) * r, headingSizes[i].h/2), h - headingSizes[i].h/2)
+          };
+        });
+        // Place subpoints with smart arc spacing
+        allSubCenters = headingCenters.map((hc, i) => {
+          const baseAngle = headingAngles[i];
+          // Spread subpoints wider for outer headings
+          const arcSpread = Math.PI/2.2;
+          const subAngles = [-arcSpread/2, 0, arcSpread/2];
+          return subAngles.map((offset, j) => {
+            let r = subCircleDist + subSizes[i][j].h/2;
+            let angle = baseAngle + offset;
+            // Clamp positions to container
+            let x = Math.min(Math.max(hc.x + Math.cos(angle) * r, subSizes[i][j].w/2), w - subSizes[i][j].w/2);
+            let y = Math.min(Math.max(hc.y + Math.sin(angle) * r, subSizes[i][j].h/2), h - subSizes[i][j].h/2);
+            return { x, y };
+          });
+        });
+        // Check bounds for all nodes
+        let allNodes = [
+          {x: center.x, y: center.y, w: centerSize.w, h: centerSize.h},
+          ...headingCenters.map((hc, i) => ({x: hc.x, y: hc.y, w: headingSizes[i].w, h: headingSizes[i].h})),
+          ...allSubCenters.flatMap((subs, i) => subs.map((sc, j) => ({x: sc.x, y: sc.y, w: subSizes[i][j].w, h: subSizes[i][j].h})))
+        ];
+        fits = allNodes.every(node =>
+          node.x - node.w/2 >= 0 && node.x + node.w/2 <= w &&
+          node.y - node.h/2 >= 0 && node.y + node.h/2 <= h
+        );
+        if (!fits) {
+          // Reduce font and padding slightly and try again
+          centerFont = Math.max(14, centerFont - 2);
+          headingFont = Math.max(10, headingFont - 1);
+          subFont = Math.max(7, subFont - 1);
+          centerPad = Math.max(10, centerPad - 2);
+          headingPad = Math.max(6, headingPad - 2);
+          subPad = Math.max(4, subPad - 2);
+          maxNodeW = Math.max(100, maxNodeW - 10);
+          maxNodeH = Math.max(48, maxNodeH - 8);
+        }
+        attempts++;
+      }
+      // --- Draw lines first ---
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+      ctx.lineWidth = 2.2;
+      ctx.shadowColor = 'rgba(0,0,0,0.18)';
+      ctx.shadowBlur = 6;
+      // Center to heading (curved)
+      headingCenters.forEach((hc, i) => {
+        drawCurvedLine(center.x, center.y, hc.x, hc.y, 0.18);
+      });
+      // Heading to subpoints (curved)
+      headingCenters.forEach((hc, i) => {
+        allSubCenters[i].forEach(sc => {
+          drawCurvedLine(hc.x, hc.y, sc.x, sc.y, 0.22);
+        });
+      });
+      ctx.restore();
+      // --- Draw nodes (center, headings, subpoints) ---
+      // Center node
+      drawNode(center.x, center.y, centerSize.w, centerSize.h, '#121212', 0.18, 36);
+      ctx.fillStyle = '#fff';
+      ctx.font = `600 ${centerFont}px Poppins, Arial, sans-serif`;
+      ctx.fillText(topic, center.x, center.y, centerSize.w * 0.9);
+      // Headings
+      data.forEach((item, i) => {
+        const hc = headingCenters[i];
+        drawNode(hc.x, hc.y, headingSizes[i].w, headingSizes[i].h, '#121212', 0.16, 28);
+        ctx.fillStyle = '#fff';
+        ctx.font = `600 ${headingFont - Math.min(3, Math.floor(item.heading.length/16))}px Poppins, Arial, sans-serif`;
+        ctx.fillText(item.heading, hc.x, hc.y, headingSizes[i].w * 0.9);
+        // Subpoints
+        allSubCenters[i].forEach((sc, j) => {
+          drawNode(sc.x, sc.y, subSizes[i][j].w, subSizes[i][j].h, '#121212', 0.12, 18);
+          ctx.fillStyle = '#fff';
+          ctx.font = `400 ${subFont - Math.min(2, Math.floor(item.subpoints[j].length/18))}px Poppins, Arial, sans-serif`;
+          ctx.fillText(item.subpoints[j], sc.x, sc.y, subSizes[i][j].w * 0.9);
+        });
+      });
+      ctx.restore();
+    }
+
+    async function fetchMindMap(topic, retry = true) {
+      const prompt = `Create a structured mind map on the topic: '${topic}' with 6 headings and 3 short subpoints each. Return only JSON: [ { heading: '', subpoints: ['', '', ''] }, ... ]`;
+      try {
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${API_KEY}`,
+            'Content-Type': 'application/json',
+            // 'HTTP-Referer': 'https://openrouter.ai/', // Removed OpenRouter
+            'X-Title': 'Mind Map Generator'
+          },
+          body: JSON.stringify({
+            model: MODEL,
+            messages: [
+              { role: 'user', content: prompt }
+            ]
+          })
+        });
+        if (!res.ok) throw new Error('API error: ' + res.status);
+        const data = await res.json();
+        if (!data.choices || !data.choices[0] || !data.choices[0].message || !data.choices[0].message.content) {
+          throw new Error('Malformed API response');
+        }
+        // Try to extract JSON from response
+        let content = data.choices[0].message.content;
+        let jsonStart = content.indexOf('[');
+        let jsonEnd = content.lastIndexOf(']');
+        if (jsonStart === -1 || jsonEnd === -1) throw new Error('No JSON found in response');
+        let jsonString = content.slice(jsonStart, jsonEnd+1);
+        let parsed;
+        try {
+          parsed = JSON.parse(jsonString);
+        } catch (e) {
+          throw new Error('Failed to parse JSON');
+        }
+        // Validate structure
+        if (!Array.isArray(parsed) || parsed.length !== 6 || !parsed.every(obj => obj.heading && Array.isArray(obj.subpoints) && obj.subpoints.length === 3)) {
+          throw new Error('Malformed mind map structure');
+        }
+        return parsed;
+      } catch (err) {
+        if (retry) {
+          // Retry once
+          return await fetchMindMap(topic, false);
+        }
+        throw err;
+      }
+    }
+
+    generateBtn.addEventListener('click', async () => {
+      const topic = topicInput.value.trim();
+      if (!topic) {
+        showError('Please enter a topic.');
+        return;
+      }
+      generateBtn.disabled = true;
+      downloadBtn.disabled = true;
+      clearError();
+      clearCanvas();
+      ctx.save();
+      ctx.font = '600 28px Poppins, Arial, sans-serif';
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.globalAlpha = 0.7;
+      ctx.fillText('Generating mind map...', canvas.width/2, canvas.height/2);
+      ctx.restore();
+      try {
+        const mapData = await fetchMindMap(topic);
+        lastMapData = { topic, data: mapData };
+        drawMindMap(topic, mapData);
+        downloadBtn.disabled = false;
+      } catch (err) {
+        clearCanvas();
+        showError('Failed to generate mind map. ' + (err.message || 'Unknown error.'));
+      } finally {
+        generateBtn.disabled = false;
+      }
+    });
+
+    topicInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        generateBtn.click();
+      }
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      // Use html2canvas to capture the canvas and download as PNG
+      html2canvas(canvas, {
+        backgroundColor: null,
+        useCORS: true,
+        scale: 1
+      }).then(canvasImg => {
+        const link = document.createElement('a');
+        link.download = 'mindmap.png';
+        link.href = canvasImg.toDataURL('image/png');
+        link.click();
+      });
+    });
+
+    // Initial state
+    clearCanvas();
+    ctx.save();
+    ctx.font = '600 28px Poppins, Arial, sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.globalAlpha = 0.7;
+    ctx.fillText('Enter a topic and click Generate', canvas.width/2, canvas.height/2);
+    ctx.restore();
+  </script>
+</body>
+</html> 
